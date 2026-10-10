@@ -742,6 +742,27 @@ describe('who is allowed to talk to it', () => {
     expect(reply.body.compatible).toBe(true);
   });
 
+  it('uses a distinct bridge identity while running as Mind Place', async () => {
+    vi.stubEnv('MIND_PLACE_MODE', '1');
+    try {
+      const reply = await request('GET', '/hello', { auth: null });
+      expect(reply.status).toBe(200);
+      expect(reply.body.app).toBe('mind-place');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('disables automatic recovery input policy in Mind Place', async () => {
+    const { recoveryInputAllowed } = await import('../src/main/bridge.js');
+    vi.stubEnv('MIND_PLACE_MODE', '1');
+    try {
+      expect(recoveryInputAllowed('passive-session', 'passive-conversation')).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('refuses every web page origin, chatgpt.com included', async () => {
     for (const origin of ['https://chatgpt.com', 'https://evil.example.com', 'http://localhost:3000', 'null']) {
       const reply = await request('GET', '/hello', { origin, auth: null });

@@ -614,6 +614,36 @@ beforeEach(async () => {
   });
 });
 
+it('refuses renderer-authored messages while running as Mind Place', async () => {
+  vi.stubEnv('MIND_PLACE_MODE', '1');
+  try {
+    const reply = await handlers.get('sessions:send')!(null, {
+      id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      sessionId: null,
+      text: 'This must stay read-only',
+      mode: 'auto',
+      dueAt: Date.now(),
+      model: null,
+      reasoningEffort: null
+    }) as any;
+
+    expect(reply).toEqual({ ok: false, error: 'Mind Place is read-only' });
+
+    for (const [channel, payload] of [
+      ['sessions:openChat', { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }],
+      ['sessions:followTab', { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }],
+      ['sessions:block', { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', blocked: true }],
+      ['sessions:trust', { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', expectedConversationId: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', trusted: true }],
+      ['sessions:rename', { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', title: 'rename' }],
+      ['sessions:delete', { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }]
+    ] as const) {
+      expect(await handlers.get(channel)!(null, payload)).toEqual({ ok: false, error: 'Mind Place is read-only' });
+    }
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it('keeps origin history navigation separate from live revision cursors over IPC', async () => {
   const session = await createSession({ title: 'History cursors' });
   const message = { kind: 'assistant_message' as const, source: 'extension' as const, time: 10,

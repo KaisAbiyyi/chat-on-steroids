@@ -60,6 +60,25 @@ declare global {
 }
 
 const api = window.api;
+const mindPlaceMode = api.productMode === 'mind-place';
+document.documentElement.dataset.productMode = api.productMode;
+if (mindPlaceMode) {
+  document.title = 'Mind Place';
+  const sidebarBrand = document.querySelector<HTMLElement>('.sidebar-brand strong');
+  if (sidebarBrand) sidebarBrand.textContent = 'Mind Place';
+  const headerBrand = document.querySelector<HTMLElement>('.chat-head .title');
+  if (headerBrand) {
+    const sub = headerBrand.querySelector<HTMLElement>('#headerSub');
+    headerBrand.firstChild!.textContent = '\n                Mind Place\n                ';
+    if (sub) sub.textContent = 'Conversation archive';
+  }
+  const empty = document.querySelector<HTMLElement>('#timelineEmpty span');
+  if (empty) empty.textContent = 'Open a ChatGPT conversation to capture it here.';
+  const setupHeading = document.querySelector<HTMLElement>('.setup-heading p');
+  if (setupHeading) setupHeading.textContent = 'Connect the browser extension that captures your ChatGPT conversations.';
+  const readyStart = document.querySelector<HTMLElement>('#readyStart');
+  if (readyStart) readyStart.lastChild!.textContent = 'Open archive';
+}
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
@@ -79,7 +98,8 @@ initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
   repaint: () => { setupOpenStep = 'browser'; if (state) apply(state); },
-  open: (browser, page) => run(api.openSetupBrowser(browser, page))
+  open: (browser, page) => run(api.openSetupBrowser(browser, page)),
+  archiveOnly: mindPlaceMode
 });
 // Escape the translucent sidebar's backdrop-filter containing block.
 document.body.append($('connectionPopover'));
@@ -191,6 +211,7 @@ function placePermissions(tab: string): void {
 }
 
 function showTab(name: string): void {
+  if (mindPlaceMode && name !== 'chat' && name !== 'setup') name = 'chat';
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -251,6 +272,15 @@ function endCapsuleMorph(): void {
  * still missing). In every other state it opens the details, where Disconnect and the reasons live.
  */
 async function connectionCapsuleAction(): Promise<void> {
+  if (mindPlaceMode) {
+    if (!state?.bridge.paired) {
+      setConnectionPopover(false);
+      openSetupStep('browser');
+      return;
+    }
+    setConnectionPopover(Boolean($('connectionPopover').hidden));
+    return;
+  }
   // It says Connect, so it connects, with or without the details open.
   if (state?.status.state === 'disconnected') {
     setConnectionPopover(false);
@@ -820,6 +850,9 @@ function missingStep(
   next: AppState,
   values: SetupConnectionValues = { tunnelId: next.config.tunnel.tunnelId, hasApiKey: next.hasApiKey }
 ): { step: string; text: string } | null {
+  if (mindPlaceMode) {
+    return next.bridge.paired ? null : { step: 'browser', text: 'Connect the ChatGPT capture extension.' };
+  }
   const { config } = next;
   // This is the same capability rule as the main-process admission gate. Desktop and
   // clipboard may legitimately be rootless; enabling one must not hide a root still needed
@@ -1348,12 +1381,14 @@ function apply(next: AppState): void {
   const { config } = next;
   const status = presentedStatus(next.status);
 
-  const connected = status.state === 'connected';
-  const offline = status.state === 'offline';
-  const disconnecting = status.state === 'disconnecting';
-  const busy = disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
-  const failed = status.state === 'auth-failed' || status.state === 'tunnel-unavailable';
-  const running = isRunning(status.state);
+  const connected = mindPlaceMode ? next.bridge.present : status.state === 'connected';
+  const offline = mindPlaceMode ? next.bridge.paired && !next.bridge.present : status.state === 'offline';
+  const disconnecting = mindPlaceMode ? false : status.state === 'disconnecting';
+  const busy = mindPlaceMode
+    ? next.bridge.running && !next.bridge.paired && !next.bridge.error
+    : disconnecting || status.state === 'starting-server' || status.state === 'connecting-tunnel';
+  const failed = mindPlaceMode ? !!next.bridge.error : status.state === 'auth-failed' || status.state === 'tunnel-unavailable';
+  const running = mindPlaceMode ? next.bridge.running : isRunning(status.state);
   const missing = currentSetupMissingStep(next);
 
   // ---- theme
@@ -1364,7 +1399,9 @@ function apply(next: AppState): void {
   // Connected, it is a quiet dot. Otherwise it opens to say what to do or what is happening: Connect,
   // Connecting…, or what went wrong. Its label keeps the last words while it closes, so the text
   // fades with the width instead of vanishing first.
-  const connectionTone = connected ? 'is-connected' : offline ? 'is-offline' : busy ? 'is-busy' : failed ? 'is-error' : '';
+  const connectionTone = mindPlaceMode
+    ? connected ? 'is-connected' : failed ? 'is-error' : busy ? 'is-busy' : ''
+    : connected ? 'is-connected' : offline ? 'is-offline' : busy ? 'is-busy' : failed ? 'is-error' : '';
   const sidebarConnection = $('sidebarConnection');
   const wasConnected = sidebarConnection.classList.contains('is-connected');
   // Disconnecting is work in progress like connecting: the capsule says so with the same light and sheen,
@@ -1376,9 +1413,11 @@ function apply(next: AppState): void {
   // anchored right, so it grows to the left, and the new words fade in as it does.
   const wasLabelled = sidebarConnection.classList.contains('has-label');
   const label = $('sidebarConnectionLabel');
-  const capsuleWords = (): string => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…')
-    // A failure says so in one short word; its reason is in the title and the details.
-    : offline ? t(STATUS_TEXT[status.state]) : failed ? t('Failed') : t('Connect');
+  const capsuleWords = (): string => mindPlaceMode
+    ? connected ? '' : next.bridge.paired ? 'Open ChatGPT' : failed ? 'Extension error' : 'Connect extension'
+    : disconnecting ? t('Disconnecting…') : busy ? t('Connecting…')
+      // A failure says so in one short word; its reason is in the title and the details.
+      : offline ? t(STATUS_TEXT[status.state]) : failed ? t('Failed') : t('Connect');
   // Connecting sends several updates with the same words: those change nothing, and a morph under way
   // keeps going. New words morph from what is on screen now, the width mid-way included.
   // Opening from the dot (Disconnecting…) morphs the same way, with no old words to fade.
@@ -1443,30 +1482,34 @@ function apply(next: AppState): void {
       { borderColor: 'color-mix(in srgb, var(--green) 70%, transparent)' }, { borderColor: 'var(--line)' }
     ], { duration: 900, easing: 'ease-out' });
   }
-  if (previousConnectionState !== null && previousConnectionState !== status.state) {
+  if (!mindPlaceMode && previousConnectionState !== null && previousConnectionState !== status.state) {
     ui($('connectionAnnounce'), 'textContent', () => t(STATUS_TEXT[status.state]));
   }
   previousConnectionState = status.state;
   const connectionPopover = $('connectionPopover');
   connectionPopover.className = `connection-popover scroll${capsuleTone ? ` ${capsuleTone}` : ''}`;
-  ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui($('connectionPopoverTitle'), 'textContent', () => mindPlaceMode
+    ? next.bridge.present ? 'Capture extension connected' : next.bridge.paired ? 'Capture extension paired' : 'Connect capture extension'
+    : t(STATUS_TEXT[status.state]));
 
   const id = config.tunnel.tunnelId;
-  ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
+  ui($('headerSub'), 'textContent', () => mindPlaceMode
+    ? next.bridge.present ? 'Capturing ChatGPT' : 'Conversation archive'
+    : config.tunnel.kind === 'openai'
       ? TUNNEL_ID_PATTERN.test(id)
         ? `${id.slice(0, 11)}…${id.slice(-4)}`
         : t("No tunnel yet")
       : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
   const connectBtn = $<HTMLButtonElement>('connectionPopoverToggle');
-  ui(connectBtn, 'textContent', () => disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
-  connectBtn.disabled = disconnecting || (!running && missing !== null);
-  connectBtn.title = !running && missing ? missing.text : '';
+  ui(connectBtn, 'textContent', () => mindPlaceMode ? 'Extension setup' : disconnecting ? t('Disconnecting…') : running ? t("Disconnect") : t("Connect"));
+  connectBtn.disabled = mindPlaceMode ? false : disconnecting || (!running && missing !== null);
+  connectBtn.title = mindPlaceMode ? '' : !running && missing ? missing.text : '';
   // One place per action: while the capsule itself says Connect or Disconnecting…, the details only
   // describe. The panel is anchored at its bottom, so it shrinks or grows from the top; a returning
   // action fades in.
   const connectActions = connectBtn.closest<HTMLElement>('.connection-popover-actions')!;
-  const hideConnectActions = status.state === 'disconnected' || disconnecting;
+  const hideConnectActions = mindPlaceMode ? false : status.state === 'disconnected' || disconnecting;
   if (connectActions.hidden !== hideConnectActions) {
     const panel = $('connectionPopover');
     const animate = !panel.hidden && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -1600,8 +1643,12 @@ function apply(next: AppState): void {
 
   const openai = config.tunnel.kind === 'openai';
   const browserRequired = browserExtensionRequired(config);
-  step('tunnel').hidden = !openai;
-  step('key').hidden = !openai;
+  step('folder').hidden = mindPlaceMode;
+  step('access').hidden = mindPlaceMode;
+  step('tunnel').hidden = mindPlaceMode || !openai;
+  step('key').hidden = mindPlaceMode || !openai;
+  step('connect').hidden = mindPlaceMode;
+  step('chatgpt').hidden = mindPlaceMode;
   step('browser').hidden = !browserRequired;
   const cosBrowser = (config.ui.chatBrowser ?? 'chrome') === 'cos';
   const browserProgress = browserSetup.render(next);
@@ -1703,7 +1750,7 @@ function apply(next: AppState): void {
   cards.replaceChildren(...connectorCards(next));
 
   // Step marks: everything before the first unfinished step counts as done.
-  const order = ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
+  const order = mindPlaceMode ? ['browser'] : ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
   const done = new Set<string>();
   if (config.roots.length > 0 || missingStep(next)?.step !== 'folder') done.add('folder');
   paintAccess(next);
@@ -1775,7 +1822,7 @@ function apply(next: AppState): void {
       nav.querySelector<HTMLButtonElement>('[data-step-nav="next"]')!.disabled = !browserProgress.ready;
     }
   }
-  paintReady(shown, done, cosBrowser, allSet, accessLevel(next), !accessWorks(next));
+  paintReady(shown, done, cosBrowser, allSet, accessLevel(next), mindPlaceMode ? false : !accessWorks(next));
 
   const needsBinary = config.tunnel.kind !== 'manual';
   ui($('binaryState'), 'textContent', () => !needsBinary
@@ -2002,15 +2049,24 @@ function paintClock(): void {
 
   const connectorRow = $('connectionPopoverConnector').parentElement!;
   const browserRow = $('connectionPopoverBrowser').parentElement!;
+  connectorRow.hidden = mindPlaceMode;
   connectorRow.dataset.tone = connected ? 'ok' : disconnecting ? 'closing' : status.state === 'starting-server' || status.state === 'connecting-tunnel' ? 'wait' : 'bad';
   browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
   ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
   ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
 
-  const triggerText = status.handshakeAt !== null && running
-    ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
-    : t(STATUS_TEXT[status.state]);
+  const triggerText = mindPlaceMode
+    ? bridge.present
+      ? 'Capture extension connected'
+      : bridge.paired
+        ? 'Capture extension paired · open ChatGPT to capture conversations'
+        : bridge.error
+          ? `Capture extension error · ${bridge.error}`
+          : 'Connect the ChatGPT capture extension'
+    : status.handshakeAt !== null && running
+      ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
+      : t(STATUS_TEXT[status.state]);
   ui($('sidebarConnection'), 'aria-label', () => triggerText);
   ui($('sidebarConnection'), 'title', () => triggerText);
 }
@@ -2038,7 +2094,9 @@ const READY_CHECKS: Record<string, { done: string; cos?: string }> = {
  */
 function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, allSet: boolean, access: AccessLevel, limited: boolean): void {
   ui($('readyTitle'), 'textContent', () => allSet ? t('You’re all set!') : t('Almost there'));
-  ui($('readyLead'), 'textContent', () => !allSet
+  ui($('readyLead'), 'textContent', () => mindPlaceMode
+    ? allSet ? 'Mind Place can now capture conversations you open in ChatGPT.' : 'Connect the browser extension to start capturing conversations.'
+    : !allSet
     ? t('Finish the steps still open below.')
     : limited
       ? t("ChatGPT can now read your folders. Ask it anything in a new chat.")
@@ -2054,7 +2112,9 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
     const narrowed = name === 'access' && limited;
     const row = el('li', `ready-check${passed ? ' is-passed' : ''}${narrowed ? ' is-limited' : ''}`);
     // Limited access is done but says what it leaves out.
-    const label = () => narrowed
+    const label = () => mindPlaceMode && name === 'browser'
+      ? 'ChatGPT capture extension connected'
+      : narrowed
       ? t(access === 'read' ? 'ChatGPT can only read files' : "ChatGPT can't edit files or run commands")
       : t(cosBrowser && check.cos ? check.cos : check.done);
     if (passed) {
@@ -2330,6 +2390,11 @@ async function dropFolders(event: DragEvent): Promise<void> {
 }
 
 async function toggleConnection(): Promise<void> {
+  if (mindPlaceMode) {
+    setConnectionPopover(false);
+    openSetupStep('browser');
+    return;
+  }
   if (!state || state.status.state === 'disconnecting') return;
   if (!isRunning(state.status.state) && !(await persistSetupDraftsForConnection())) {
     const missing = state ? missingStep(state) : null;
@@ -2616,10 +2681,10 @@ initChat({ save: () => save(), state: () => state });
 void (async () => {
   await refresh();
   // A first run has nothing set up, so open on the wizard rather than an empty Home.
-  showTab(state && missingStep(state)?.step === 'folder' ? 'setup' : 'chat');
+  showTab(state && (mindPlaceMode ? missingStep(state) !== null : missingStep(state)?.step === 'folder') ? 'setup' : 'chat');
   // What's New after a real update (#1172); a first run on the Setup wizard has nothing new to show.
   const started = state as AppState | null;
-  if (started && missingStep(started)?.step !== 'folder') initWhatsNew(started.update.current, started.config.ui.lastSeenVersion);
+  if (!mindPlaceMode && started && missingStep(started)?.step !== 'folder') initWhatsNew(started.update.current, started.config.ui.lastSeenVersion);
   const entries = await run(api.getLog());
   const key = (entry: LogEntry): string => `${entry.time}\0${entry.level}\0${entry.agent ?? ''}\0${entry.message}`;
   const shown = new Map<string, number>();

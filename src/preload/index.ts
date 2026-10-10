@@ -16,6 +16,7 @@ import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSea
 import type { TurnTrace } from '../shared/turn-trace.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
+import { productModeFromEnvironment } from '../shared/product-mode.js';
 /**
  * The entire renderer-facing API.
  *
@@ -94,6 +95,7 @@ export interface SessionDetail {
 }
 
 const api = {
+  productMode: productModeFromEnvironment(process.env.MIND_PLACE_MODE),
   terminalCreate: (id: string, projectId: string | null, cols: number, rows: number) => call<WorkspaceTerminalInfo>('workspaceTerminal:request', { action: 'create', id, projectId, cols, rows }),
   terminalWrite: (id: string, data: string) => call<void>('workspaceTerminal:request', { action: 'write', id, data }),
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),

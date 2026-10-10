@@ -48,6 +48,7 @@ import { confirmedPluginSchemas, pluginRefreshPublications } from './plugin-refr
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { z } from 'zod';
+import { mindPlaceMode } from '../shared/product-mode.js';
 import {
   CAPABILITIES,
   browserExtensionRequired,
@@ -545,6 +546,10 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
       return { ok: false as const, error: message };
     }
   });
+}
+
+function assertAuthoringEnabled(): void {
+  if (mindPlaceMode(process.env.MIND_PLACE_MODE)) throw new Error('Mind Place is read-only');
 }
 
 /** Shows a recorded chat's ChatGPT page: its open tab when there is one, else a new one. */
@@ -1243,12 +1248,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return stageInputAttachments(sources, retained);
   };
   handle('sessions:files', async () => {
+    assertAuthoringEnabled();
     const chosen = await dialog.showOpenDialog({ title: 'Attach files', properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
     return stageFiles(chosen.filePaths);
   });
   handle('sessions:dropFiles', async payload => {
+    assertAuthoringEnabled();
     const { files } = z.object({ files: z.array(z.union([
       z.string().min(1).max(32768),
       z.object({ name: z.string().min(1).max(255), bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 12 * 1024 * 1024) }).strict()
@@ -1256,44 +1263,64 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return stageFiles(files);
   });
   handle('sessions:attachText', async payload => {
+    assertAuthoringEnabled();
     const { text } = z.object({ text: z.string().min(1).max(4 * 1024 * 1024) }).parse(payload);
     return (await stageFiles([{ text }]))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
+    assertAuthoringEnabled();
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
     return stopSessionTurn(id, expectedTurnId);
   });
   handle('sessions:releaseFinish', async (payload) => {
+    assertAuthoringEnabled();
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
     await sessionControlsFor(id);
     await releaseSessionFinish(id, expectedTurnId);
     return sessionControlsFor(id);
   });
   handle('sessions:generateFinishGoal', async payload => {
+    assertAuthoringEnabled();
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
     return requestSessionFinishGoal(id, expectedTurnId);
   });
   handle('chatModels:get', async () => getChatModels());
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
-  handle('chatModels:request', async () => startChatModelDiscovery());
+  handle('chatModels:request', async () => {
+    assertAuthoringEnabled();
+    return startChatModelDiscovery();
+  });
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
-  handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
+  handle('sessions:cancelRecovery', async (payload) => {
+    assertAuthoringEnabled();
+    return cancelAssistantRecovery(sessionIdArg.parse(payload).id);
+  });
   handle('sessions:automation', async (payload) => {
+    assertAuthoringEnabled();
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
     return setSessionAutomation(id, automation, afterTurn);
   });
   handle('sessions:objective', async (payload) => {
+    assertAuthoringEnabled();
     const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(16000), mode: z.enum(['goal', 'loop']) }).parse(payload);
     return setSessionObjective(id, text, mode);
   });
-  handle('sessions:compact', async (payload) => compactSession(sessionIdArg.parse(payload).id));
+  handle('sessions:compact', async (payload) => {
+    assertAuthoringEnabled();
+    return compactSession(sessionIdArg.parse(payload).id);
+  });
   handle('sessions:resumeFromHandoff', async (payload) => {
+    assertAuthoringEnabled();
     const input = sessionIdArg.extend({ handoffId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) }).strict().parse(payload);
     return resumeFromSavedSummary(input.id, input.handoffId);
   });
-  handle('sessions:cancelCompaction', async (payload) => cancelSessionCompaction(sessionIdArg.parse(payload).id));
+  handle('sessions:cancelCompaction', async (payload) => {
+    assertAuthoringEnabled();
+    return cancelSessionCompaction(sessionIdArg.parse(payload).id);
+  });
   handle('sessions:plan', async (payload) => {
+    assertAuthoringEnabled();
     const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(16000), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
     const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => {
       const target = getWindow();
@@ -1302,16 +1329,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return runTaskRequest(requestId ?? randomUUID(), JSON.stringify(['plan', text, backend]), signal => draftTaskPlan(text, backend, publish, signal), publish);
   });
   handle('sessions:send', async (payload) => {
+    assertAuthoringEnabled();
     const input = inputArgs.parse(payload);
     await validateInputImages(input.images ?? []);
     return sendDesktopInput(input);
   });
   handle('sessions:outbox', async () => (await listInputs()).filter((row) => row.purpose !== 'decision'));
   handle('sessions:reorderInputs', async (payload) => {
+    assertAuthoringEnabled();
     const { sessionId, ids } = z.object({ sessionId: z.string().min(8).max(64), ids: z.array(z.string().uuid()).min(1).max(10000) }).parse(payload);
     return reorderQueuedInputs(sessionId, ids);
   });
-  handle('sessions:retryBrowser', async (payload) => retryQueuedInputBrowser(z.object({ id: z.string().uuid() }).parse(payload).id));
+  handle('sessions:retryBrowser', async (payload) => {
+    assertAuthoringEnabled();
+    return retryQueuedInputBrowser(z.object({ id: z.string().uuid() }).parse(payload).id);
+  });
   handle('sessions:pausedHelpers', async () => pausedBrowserHelpers());
   // What a working chat's tool calls are doing right now, for its live caption.
   handle('sessions:runningTools', async (payload) => {
@@ -1343,12 +1375,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return readTurnTraces(id, turnIds);
   });
   handle('sessions:retryHelper', async (payload) => {
+    assertAuthoringEnabled();
     const { id, sourceSessionId } = z.object({ id: z.string().uuid(), sourceSessionId: z.string().min(8).max(64) }).parse(payload);
     return retryGoalBrowserHelper(sourceSessionId, id);
   });
-  handle('sessions:editInput', async (payload) => { const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: inputArgs.shape.text, afterTurn: z.boolean().optional() }).parse(payload); return editQueuedInput(id, text, afterTurn); });
-  handle('sessions:cancelInput', async (payload) => cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id));
+  handle('sessions:editInput', async (payload) => {
+    assertAuthoringEnabled();
+    const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: inputArgs.shape.text, afterTurn: z.boolean().optional() }).parse(payload);
+    return editQueuedInput(id, text, afterTurn);
+  });
+  handle('sessions:cancelInput', async (payload) => {
+    assertAuthoringEnabled();
+    return cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id);
+  });
   handle('sessions:inputAutomation', async payload => {
+    assertAuthoringEnabled();
     const { id, mode, loopAfterTurn } = z.object({ id: z.string().uuid(), mode: z.enum(['off', 'goal', 'loop']), loopAfterTurn: z.boolean().optional() }).parse(payload);
     return setInputAutomation(id, mode, loopAfterTurn);
   });
@@ -1360,6 +1401,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('sessions:openChat', async (payload) => {
+    assertAuthoringEnabled();
     const { id } = sessionIdArg.parse(payload);
     await openSessionChat(id);
     return true;
@@ -1369,6 +1411,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // the newest selection counts: a slower lookup for an earlier click must not win (#1267).
   let followSelection = 0;
   handle('sessions:followTab', async (payload) => {
+    assertAuthoringEnabled();
     const { id } = sessionIdArg.parse(payload);
     const selection = ++followSelection;
     const conversationId = (await getSession(id))?.conversationId;
@@ -1386,6 +1429,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * conversation has no rogue turn to stop and is refused rather than silently ignored.
    */
   handle('sessions:block', async (payload) => {
+    assertAuthoringEnabled();
     const { id, blocked } = z
       .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), blocked: z.boolean() })
       .parse(payload);
@@ -1421,6 +1465,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('sessions:trust', async (payload) => {
+    assertAuthoringEnabled();
     const { id, expectedConversationId, trusted } = z
       .object({
         id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
@@ -1476,6 +1521,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return locateSearchMatch(id, query);
   });
   handle('sessions:rename', async (payload) => {
+    assertAuthoringEnabled();
     const { id, title } = sessionNameArg.parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
     const name = cleanSessionName(title);
@@ -1485,6 +1531,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return true;
   });
   handle('sessions:delete', async (payload) => {
+    assertAuthoringEnabled();
     const { id } = sessionIdArg.parse(payload);
     if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
     deletingSessionIds.add(id);
@@ -1705,6 +1752,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onGoalChange(() => push('session:changed'));
   handle('tasks:cancel', async payload => cancelTaskRequest(z.object({ requestId: z.string().uuid() }).parse(payload).requestId));
   handle('sessions:goalOpening', async payload => {
+    assertAuthoringEnabled();
     const { text, mode, requestId } = z.object({ text: z.string().trim().min(1).max(16000),
       mode: z.enum(['goal', 'loop']), requestId: z.string().uuid() }).parse(payload);
     const backend = goalBackendFor(mode);

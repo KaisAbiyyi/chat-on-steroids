@@ -86,6 +86,7 @@ import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
 
 const api = window.api;
+const mindPlaceMode = api.productMode === 'mind-place';
 let chatSearch: ChatSearch | null = null;
 
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
@@ -575,6 +576,10 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     ui(indicator, 'aria-label', () => t(status.text));
     top.append(indicator);
   }
+  if (mindPlaceMode) {
+    row.append(top);
+    return row;
+  }
   // One button for the chat's actions, as in ChatGPT; a right click on the row opens the same menu.
   const owner = `chat:${summary.id}`;
   const items: RowMenuItem[] = [];
@@ -861,6 +866,10 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     selectedId = null;
     detailFor = null;
     detailCursor = null;
+  }
+  if (mindPlaceMode && selectedId === null && sessions[0]) {
+    selectSession(sessions[0].id);
+    return;
   }
   paintSessions();
   chatSearch?.refresh();
@@ -5891,12 +5900,13 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  if (mindPlaceMode) name = 'timeline';
   const pane = $('chatBody');
   const leavingTimeline = timelineShown() && name !== 'timeline';
   if (leavingTimeline) timelineScrollTop = pane.scrollTop;
-  $('composer').hidden = name === 'settings';
-  $('composerDock').hidden = name === 'settings';
-  $('inputQueue').hidden = name !== 'timeline';
+  $('composer').hidden = mindPlaceMode || name === 'settings';
+  $('composerDock').hidden = mindPlaceMode || name === 'settings';
+  $('inputQueue').hidden = mindPlaceMode || name !== 'timeline';
   for (const button of $('chatView').querySelectorAll<HTMLButtonElement>('[data-view]')) {
     button.classList.toggle('is-sel', button.dataset.view === name);
   }
@@ -5953,13 +5963,17 @@ function selectSession(id: string): void {
     paintDetail(false);
     paintHandoff();
     // With Background chats on, the chat's tab becomes the selected one in that window (#1249).
-    void api.followSessionTab?.(id)?.catch(() => undefined);
+    if (!mindPlaceMode) void api.followSessionTab?.(id)?.catch(() => undefined);
   }
   void loadDetail();
-  void refreshInputQueue();
+  if (!mindPlaceMode) void refreshInputQueue();
 }
 
 function selectNewChat(projectId: string | null = null): void {
+  if (mindPlaceMode) {
+    if (sessions[0]) selectSession(sessions[0].id);
+    return;
+  }
   rememberDraft(); selectionGeneration++; replaceComposerDraft(); pendingNewInput = null;
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;

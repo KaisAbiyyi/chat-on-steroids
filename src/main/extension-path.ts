@@ -31,6 +31,11 @@ import { app } from 'electron';
 
 const MATERIALIZED_FINGERPRINT = '.chat-on-steroids-source';
 const PUBLISH_LAST = new Set(['manifest.json', MATERIALIZED_FINGERPRINT]);
+const MIND_PLACE_EXTENSION_NAME = 'Mind Place Capture';
+
+function mindPlaceRuntime(): boolean {
+  return process.env.MIND_PLACE_MODE === '1';
+}
 
 function extensionFingerprint(root: string): string {
   const hash = createHash('sha256');
@@ -63,6 +68,27 @@ function validExtension(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+function brandMindPlaceExtension(dir: string): string | null {
+  if (!validExtension(dir)) return null;
+  try {
+    const manifestPath = path.join(dir, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    if (manifest.name !== MIND_PLACE_EXTENSION_NAME) {
+      manifest.name = MIND_PLACE_EXTENSION_NAME;
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    }
+    return dir;
+  } catch {
+    return null;
+  }
+}
+
+function developmentExtensionCandidates(): string[] {
+  const candidates = [path.join(app.getAppPath(), 'extension'), path.join(process.cwd(), 'extension')];
+  if (typeof process.resourcesPath === 'string' && process.resourcesPath) candidates.push(path.join(process.resourcesPath, 'extension'));
+  return candidates;
 }
 
 function materializedFingerprint(dir: string): string | null {
@@ -266,6 +292,23 @@ function materializePackagedExtension(bundled: string, stable: string): string |
  * extension folder — so the checkout path is what answers there.
  */
 export function extensionDir(): string | null {
+  if (mindPlaceRuntime()) {
+    const stable = path.join(app.getPath('userData'), 'extension');
+    const candidates = app.isPackaged
+      ? [path.join(process.resourcesPath, 'extension')]
+      : developmentExtensionCandidates();
+    for (const bundled of candidates) {
+      if (!validExtension(bundled)) continue;
+      try {
+        const published = materializePackagedExtension(bundled, stable);
+        if (published) return brandMindPlaceExtension(published);
+      } catch {
+        // A later candidate or a last-known-good stable copy may still be usable.
+      }
+    }
+    return brandMindPlaceExtension(stable);
+  }
+
   if (app.isPackaged) {
     const bundled = path.join(process.resourcesPath, 'extension');
     const stable = path.join(app.getPath('userData'), 'extension');
@@ -279,11 +322,7 @@ export function extensionDir(): string | null {
     }
   }
 
-  const candidates = [
-    path.join(app.getAppPath(), 'extension'),
-    path.join(process.cwd(), 'extension'),
-    path.join(process.resourcesPath, 'extension')
-  ];
+  const candidates = developmentExtensionCandidates();
   for (const candidate of candidates) {
     if (existsSync(path.join(candidate, 'manifest.json'))) return candidate;
   }

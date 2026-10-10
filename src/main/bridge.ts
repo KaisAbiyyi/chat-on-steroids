@@ -3,6 +3,7 @@ import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-tr
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
 import { notePluginInstalled, notePluginMissing } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
+import { mindPlaceMode } from '../shared/product-mode.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
 import type { BrowserResult } from '../shared/browser-control.js';
@@ -2120,6 +2121,7 @@ function goalActiveFor(id: string): boolean {
 
 /** Policy gate only: the live silence grant files the outbox's exact recovery claim. */
 export function recoveryInputAllowed(sessionId: string, id: string): boolean {
+  if (mindPlaceMode(process.env.MIND_PLACE_MODE)) return false;
   return (goalActiveFor(id) || getConfig().ui.autoContinue !== false) && !goalFencedChat(id) &&
     !isChatBlocked(id) && !stopRequestedFor(id) && !continuationForSession(sessionId);
 }
@@ -2195,7 +2197,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       res,
       200,
       {
-        app: 'chat-on-steroids',
+        app: mindPlaceMode(process.env.MIND_PLACE_MODE) ? 'mind-place' : 'chat-on-steroids',
         version: APP_VERSION,
         bridge: BRIDGE_PROTOCOL,
         // Unknown, not incompatible, for a caller that states no protocol (curl in a bug report).
@@ -6836,6 +6838,7 @@ async function failedCompactionTurnCurrent(conversationId: string, sessionId: st
 }
 
 async function considerAutomaticCompaction(conversationId: string, sessionId: string, failedTurn?: string): Promise<void> {
+  if (mindPlaceMode(process.env.MIND_PLACE_MODE)) return;
   if (!getConfig().compaction.auto || compactionFilings.has(conversationId)) return;
   if (goalFencedChat(conversationId) || continuationForSession(sessionId) || stopRequestedFor(conversationId)) return;
   // Exact tool attribution already owns this grant and consumes it on final/Stop.
@@ -7648,6 +7651,7 @@ function queueBrowserRecovery(
   now = Date.now(),
   assistantSource?: Repair['assistantSource']
 ): boolean {
+  if (mindPlaceMode(process.env.MIND_PLACE_MODE)) return false;
   // A blocked chat is one the user took this app's hands off, and every repair here is a hand
   // going back on: a reload restarts the rogue page's turn machinery, and a reopen gives a
   // conversation whose every tool call is already being refused a brand-new tab to try from.

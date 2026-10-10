@@ -377,6 +377,37 @@ html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFo
   display: none !important;
 }
 
+/* Mind Place is the storage-first product surface. CoS authoring/workspace markup stays in the
+   bundle so this branch can keep merging upstream without maintaining a second renderer. */
+html[data-product-mode='mind-place'] :is(
+  #viewMenu,
+  #sidebarPrimary,
+  #projectsSection,
+  #workspaceSettings,
+  #chatSettingsBtn,
+  #chatView,
+  #inputQueue,
+  #composerDock,
+  #composer,
+  #chatAgentFilter,
+  .header-dock-controls,
+  .work-dock
+) {
+  display: none !important;
+}
+
+html[data-product-mode='mind-place'] :is(
+  .setup-panel .advanced,
+  #pluginRefreshReminder,
+  #browserPhaseLocation
+) {
+  display: none !important;
+}
+
+html[data-product-mode='mind-place'] .sidebar-sessions {
+  min-height: 0;
+}
+
 /* --ico is the space an icon takes in the layout; --glyph is its optical size. Phosphor
    leaves generous padding inside each glyph, so the drawing stays at 17px when a compact
    control narrows its box, and the centred glyph may overhang that box slightly. Only

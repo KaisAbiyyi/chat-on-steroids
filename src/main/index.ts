@@ -121,6 +121,14 @@ let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
 const usageWarmup = new AbortController();
+const mindPlaceRuntime = process.env.MIND_PLACE_MODE === '1';
+
+// Mind Place is a separate local archive product even though it reuses the CoS runtime. Give it
+// an independent profile before Electron derives the single-instance lock or any persistent path,
+// so running/developing CoS cannot mix config, pairing proof, sessions, or durable state with it.
+if (mindPlaceRuntime) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'Mind Place'));
+}
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -160,7 +168,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: true } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: windowBackgroundForTheme(getConfig().ui.theme, getConfig().ui.appearance),
-    title: 'Chat On Steroids',
+    title: process.env?.MIND_PLACE_MODE === '1' ? 'Mind Place' : 'Chat On Steroids',
     webPreferences: {
       zoomFactor: UI_BASE_ZOOM,
       preload: path.join(__dirname, '../preload/index.js'),
@@ -247,6 +255,10 @@ function createWindow(): void {
     window = null;
     if (!quitting && process.platform !== 'darwin' && !getConfig().ui.minimizeToTray) void shutdownPetOverlay();
   });
+
+  // The show observer above is intentionally kept source-identical for CoS lifecycle invariants.
+  // Mind Place is storage-only, so remove that sole listener before the window can become visible.
+  if (mindPlaceRuntime) window.removeAllListeners('show');
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -342,6 +354,22 @@ function trayIcon(running: boolean): Electron.NativeImage {
 
 function refreshTray(): void {
   if (!tray) return;
+  if (mindPlaceRuntime) {
+    tray.setImage(trayIcon(false));
+    tray.setToolTip('Mind Place');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open Mind Place', click: windowActivation.request },
+      { type: 'separator' },
+      {
+        label: mainText('Quit'),
+        click: () => {
+          quitting = true;
+          app.quit();
+        }
+      }
+    ]));
+    return;
+  }
   const state = getStatus().state;
   const connected = state === 'connected';
   const offline = state === 'offline';
@@ -554,7 +582,7 @@ void app.whenReady().then(async () => {
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
   // The desktop pet overlay is independent of the main window once started; it stays hidden
   // until a pet is enabled.
-  await startPetOverlay(() => window, () => windowActivation.request());
+  if (!mindPlaceRuntime) await startPetOverlay(() => window, () => windowActivation.request());
   // macOS `activate` can fire on first launch, so do not wire it at module load where it could
   // create a BrowserWindow before Electron is ready. Once the initial window path is established,
   // Dock activation/re-launch can safely recreate or focus it.
@@ -574,32 +602,35 @@ void app.whenReady().then(async () => {
   // Historical Unattributed repair may legitimately scan and rewrite a large legacy bucket.
   // It is maintenance, not a prerequisite for showing the app or accepting new exact-id
   // traffic, so never make startup/reload wait behind years of old session history.
-  queueDeterministicAttributionRepair();
+  if (!mindPlaceRuntime) queueDeterministicAttributionRepair();
 
   // Recording, workers and direct browser tools share one extension transport.
   // ipc.ts uses the same eligibility rule when settings change.
   // The CoS browser starts once the bridge listens: its extension looks for the app as soon as it
   // loads, and a miss would leave it waiting for its next retry.
   if (browserExtensionRequired(getConfig())) {
-    void startBridge().finally(() => void syncCosBrowser());
-  } else void syncCosBrowser();
+    if (mindPlaceRuntime) void startBridge();
+    else void startBridge().finally(() => void syncCosBrowser());
+  } else if (!mindPlaceRuntime) void syncCosBrowser();
   // Opt-in, and only once every fact it projects has been restored. ipc.ts starts and stops it
   // when the setting changes; a failed bind is logged and leaves the rest of the app untouched.
-  if (getConfig().controlApi.enabled) {
+  if (!mindPlaceRuntime && getConfig().controlApi.enabled) {
     startControlApi().catch((error: Error) => logWarn(`control API did not start: ${error.message}`));
   }
-  if (getConfig().ui.autoConnect) void connect();
+  if (!mindPlaceRuntime && getConfig().ui.autoConnect) void connect();
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
   // window that is already on screen. Everything it learns arrives through the ordinary state
   // push, every failure ends inside it, and its own timer keeps it running for a tray app that
   // is never restarted.
-  startUpdateChecks();
+  if (!mindPlaceRuntime) startUpdateChecks();
   // Warm the existing derived cache once, after startup, without delaying the UI.
   // A visit to Usage joins this same calculation; unchanged recordings cost no reads.
-  void usageOverview(usageWarmup.signal).catch((error: Error) => {
-    if (!usageWarmup.signal.aborted) logWarn(`usage background refresh failed: ${error.message}`);
-  });
+  if (!mindPlaceRuntime) {
+    void usageOverview(usageWarmup.signal).catch((error: Error) => {
+      if (!usageWarmup.signal.aborted) logWarn(`usage background refresh failed: ${error.message}`);
+    });
+  }
 });
 
 app.on('before-quit', () => {

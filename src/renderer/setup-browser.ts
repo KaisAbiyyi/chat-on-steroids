@@ -44,6 +44,7 @@ export function initBrowserSetup(actions: {
   choose(browser: ChatBrowser): void;
   repaint(): void;
   open(browser: ExternalBrowser, page: 'extensions' | 'chatgpt'): Promise<unknown>;
+  archiveOnly?: boolean;
 }): { render(state: AppState): { ready: boolean; choosingLocation: boolean } } {
   let current: AppState | null = null;
   let phase: 'extension' | 'location' = 'extension';
@@ -61,12 +62,13 @@ export function initBrowserSetup(actions: {
 
   const render = (state: AppState): { ready: boolean; choosingLocation: boolean } => {
     current = state;
-    const browser = state.config.ui.chatBrowser ?? 'chrome';
-    if (!initialized || browser !== savedBrowser) {
-      if (browser !== 'cos') external = browser;
+    const configuredBrowser = state.config.ui.chatBrowser ?? 'chrome';
+    if (!initialized || configuredBrowser !== savedBrowser) {
+      if (configuredBrowser !== 'cos') external = configuredBrowser;
       initialized = true;
-      savedBrowser = browser;
+      savedBrowser = configuredBrowser;
     }
+    const browser = actions.archiveOnly ? external : configuredBrowser;
     // Installed: the extension in the person's own browser, in a version this app expects. A live
     // sighting wins; with that browser closed, the lasting proof stands in, because the built-in
     // browser does not need Chrome open once signed in. A live old version always asks to update.
@@ -77,14 +79,15 @@ export function initBrowserSetup(actions: {
     const knownVersion = !!shownVersion && /^\d+\.\d+\.\d+$/.test(shownVersion);
     const outdated = knownVersion && isNewer(state.update.current, shownVersion!);
     ready = state.bridge.running && state.bridge.paired && (live || proof !== null) && knownVersion && !outdated;
-    if (!steered) phase = ready ? 'location' : 'extension';
+    if (!steered) phase = actions.archiveOnly ? 'extension' : ready ? 'location' : 'extension';
     const cos = browser === 'cos';
     $('browserExtensionStage').hidden = phase !== 'extension';
-    $('browserLocationStage').hidden = phase !== 'location';
+    $('browserLocationStage').hidden = actions.archiveOnly === true || phase !== 'location';
     $('browserPhaseExtension').setAttribute('aria-current', phase === 'extension' ? 'step' : 'false');
     $('browserPhaseLocation').setAttribute('aria-current', phase === 'location' ? 'step' : 'false');
     $('browserPhaseExtension').classList.toggle('is-complete', ready);
     $<HTMLButtonElement>('browserContinue').disabled = !ready;
+    $<HTMLButtonElement>('browserContinue').hidden = actions.archiveOnly === true;
     $('browserConnectionLost').hidden = ready;
     for (const segment of document.querySelectorAll<HTMLButtonElement>('[data-external-browser]')) {
       const selected = segment.dataset.externalBrowser === external;
@@ -125,7 +128,7 @@ export function initBrowserSetup(actions: {
     button.querySelector('i')!.className = login.signedIn ? 'ico ph ph-sign-out' : 'ico ph ph-sign-in';
     ui(button.querySelector('span')!, 'textContent', () => login.signedIn ? t('Sign out of ChatGPT') : t('Sign in to ChatGPT'));
     // Done is a fact about the person's setup, not about which part of the step is on screen.
-    return { ready: ready && login.done, choosingLocation: phase === 'location' };
+    return { ready: ready && login.done, choosingLocation: !actions.archiveOnly && phase === 'location' };
   };
   const changePhase = (next: typeof phase): void => {
     if (next === 'location' && !ready) return;

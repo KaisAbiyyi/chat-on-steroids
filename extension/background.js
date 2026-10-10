@@ -28,6 +28,13 @@ import './i18n.js';
 const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null;
 
 const PORTS = [8765, 8766, 8767, 8768, 8769];
+const EXPECTED_APP = (() => {
+  try {
+    return chrome.runtime.getManifest().name === 'Mind Place Capture' ? 'mind-place' : 'chat-on-steroids';
+  } catch {
+    return 'chat-on-steroids';
+  }
+})();
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** A journal receipt follows durable session writes, which can outlast an ordinary read. */
@@ -1047,7 +1054,7 @@ async function hello(candidate) {
     }, HELLO_TIMEOUT_MS);
     if (!response.ok) return null;
     const body = await response.json();
-    return body && body.app === 'chat-on-steroids' ? body : null;
+    return body && body.app === EXPECTED_APP ? body : null;
   } catch {
     return null;
   }

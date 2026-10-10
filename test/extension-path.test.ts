@@ -7,6 +7,7 @@ let base: string | null = null;
 const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   vi.resetModules();
   vi.doUnmock('electron');
   if (base) await removeTempDir(base);
@@ -16,6 +17,31 @@ afterEach(async () => {
     writable: true,
     value: originalResourcesPath
   });
+});
+
+it('materializes an isolated Mind Place companion extension during development', async () => {
+  base = await makeTempDir('mind-place-extension-path-');
+  const source = path.join(base, 'checkout', 'extension');
+  const userData = path.join(base, 'mind-place-user-data');
+  await fs.mkdir(source, { recursive: true });
+  await fs.writeFile(path.join(source, 'manifest.json'), JSON.stringify({ version: '9.9.9', name: 'Chat On Steroids' }));
+  await fs.writeFile(path.join(source, 'background.js'), 'source companion');
+
+  vi.stubEnv('MIND_PLACE_MODE', '1');
+  vi.doMock('electron', () => ({
+    app: {
+      isPackaged: false,
+      getPath: (name: string) => (name === 'userData' ? userData : ''),
+      getAppPath: () => path.join(base!, 'checkout')
+    }
+  }));
+
+  const { extensionDir } = await import('../src/main/extension-path.js');
+  const published = extensionDir();
+  expect(published).toBe(path.join(userData, 'extension'));
+  expect(published).not.toBe(source);
+  expect(JSON.parse(await fs.readFile(path.join(published!, 'manifest.json'), 'utf8')).name).toBe('Mind Place Capture');
+  expect(JSON.parse(await fs.readFile(path.join(source, 'manifest.json'), 'utf8')).name).toBe('Chat On Steroids');
 });
 
 it('materializes a packaged extension into a stable per-user folder', async () => {
