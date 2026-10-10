@@ -2165,6 +2165,46 @@ function chatIsWorkingNow(conversationId: string, now = Date.now()): boolean {
   return liveTurnIsCurrent(conversationId, now) || (activeUntil.get(conversationId)?.until ?? 0) > now;
 }
 
+/**
+ * Browser-extension routes that can author, recover, navigate or otherwise act on ChatGPT.
+ *
+ * Mind Place deliberately keeps the observation half of the companion bridge (`/events`,
+ * `/correlations`, `/closed`, `/activity`, diagnostics/presence and image capture) but must
+ * never inherit CoS's action half merely because both products reuse one extension runtime.
+ * Keep the fence here, after authentication/protocol checks and before any route-specific
+ * parsing, so a stale or malicious Mind Place page cannot reach an authoring path even when
+ * its UI was hidden correctly.
+ */
+const MIND_PLACE_ACTIVE_BROWSER_ROUTES = new Set([
+  '/cos-browser/sign-in',
+  '/browser-control',
+  '/models',
+  '/plugin-refresh',
+  '/input/claim',
+  '/input/bind',
+  '/input/ack',
+  '/input/fail',
+  '/input/answer',
+  '/input/progress',
+  '/input/attachment',
+  '/repairs/claim',
+  '/compact',
+  '/goal/draft',
+  '/goal/ack',
+  '/goal/objective',
+  '/goal/open',
+  '/commands/revivals/pending',
+  '/commands/redeem',
+  '/commands/step',
+  '/commands/ack'
+]);
+
+function mindPlaceBrowserRouteBlocked(route: string, method: string | undefined): boolean {
+  if (!mindPlaceMode(process.env.MIND_PLACE_MODE)) return false;
+  if (route === '/settings') return method === 'POST';
+  return MIND_PLACE_ACTIVE_BROWSER_ROUTES.has(route);
+}
+
 async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const receivedAt = Date.now();
   const { ok: originAllowed, origin } = originOf(req);
@@ -2301,6 +2341,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // consume the browser's shared budget before failing origin/authentication.
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
   if (noteBrowserSeen(req)) changed();
+  if (mindPlaceBrowserRouteBlocked(route, req.method)) {
+    return json(res, 403, { error: 'mind_place_read_only' }, origin);
+  }
 
   // Only an explicit login operation accepts a session. Never put cookies in diagnostics,
   // command journals, status snapshots, recorder events or HTTP error descriptions.

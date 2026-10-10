@@ -76,6 +76,10 @@ if (mindPlaceMode) {
   if (empty) empty.textContent = 'Open a ChatGPT conversation to capture it here.';
   const setupHeading = document.querySelector<HTMLElement>('.setup-heading p');
   if (setupHeading) setupHeading.textContent = 'Connect the browser extension that captures your ChatGPT conversations.';
+  const browserInstallInstruction = document.querySelector<HTMLElement>('.browser-install-instruction');
+  if (browserInstallInstruction) browserInstallInstruction.textContent = 'Click Load unpacked and choose the Mind Place Capture folder.';
+  const bridgeDownload = document.querySelector<HTMLElement>('#bridgeDownload');
+  if (bridgeDownload) bridgeDownload.hidden = true;
   const readyStart = document.querySelector<HTMLElement>('#readyStart');
   if (readyStart) readyStart.lastChild!.textContent = 'Open archive';
 }

@@ -24,6 +24,14 @@
 (() => {
   'use strict';
 
+  const ARCHIVE_ONLY = (() => {
+    try {
+      return chrome.runtime.getManifest().name === 'Mind Place Capture';
+    } catch {
+      return false;
+    }
+  })();
+
   // Static content scripts are not re-run in an already-open tab when an unpacked
   // extension is reloaded/updated. background.js deliberately re-injects this file into
   // those tabs from runtime.onInstalled. The normal static injection can race that recovery
@@ -5167,6 +5175,7 @@
   }
 
   function paint() {
+    if (ARCHIVE_ONLY) return;
     // The canonical stream is now the only app-owned activity presentation. Restore rows
     // touched by older code/candidate builds, then leave unmatched provider rows native.
     unpaint();
@@ -6511,6 +6520,7 @@
   }
 
   function renderStreams() {
+    if (ARCHIVE_ONLY) return;
     // Do not mount chat A's durable stream into a fresh-composer DOM while its future chat B
     // still has no route id (or after the route changed before observe() processed it).
     // Keeping the existing DOM untouched also preserves the harmless transient-null case.
@@ -7878,6 +7888,11 @@
    * it cannot be interrupted by a repaint.
    */
   function injectControl() {
+    if (ARCHIVE_ONLY) {
+      if (control?.root?.isConnected) control.root.remove();
+      control = null;
+      return;
+    }
     // A brand-new ChatGPT tab used to have nothing to offer — nothing to compact, no feed to
     // read, and a disabled "send a message first" button is not worth half a composer. It has
     // something now: a goal written here is what writes the chat's first message, so the sheet
@@ -8748,6 +8763,7 @@
    * typed it, so it still holds when the chat is reopened days later.
    */
   function foldBootstrap() {
+    if (ARCHIVE_ONLY) return;
     if (!alive || !document?.querySelectorAll) return;
     const node = CLF_DOM.firstUserMessage();
     const current = bootstrap && bootstrapOwner?.conversationId === conversationId &&
@@ -9306,6 +9322,10 @@
    * control beside it: ChatGPT replaces this subtree whenever it feels like it.
    */
   function injectStage() {
+    if (ARCHIVE_ONLY) {
+      removeStagePanel();
+      return;
+    }
     // Stage state is conversation-scoped. A concrete different route is handled by
     // resetConversation(); an id-less route is the New Chat/transient-router gap. In both
     // cases the current composer is not proven to belong to the state we would paint.
@@ -9624,6 +9644,7 @@
    * ChatGPT's own marker or at an explicit cancel, never at a second Send.
    */
   async function maybeResumePendingCompaction(forId = conversationId, forEpoch = epoch) {
+    if (ARCHIVE_ONLY) return;
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
     if (!source || nativeBusy || localError) return;
     if (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved') return;
@@ -10444,6 +10465,7 @@
    * would have been skipped; enabling it later must not replay history.
    */
   function maybeRecoverResumeGoalTurn() {
+    if (ARCHIVE_ONLY) return;
     const pending = resumeGoalPending;
     if (!pending || !conversationId) return;
     if (pending.conversationId !== conversationId) {
@@ -10505,6 +10527,7 @@
    * ChatGPT's composer to be truly idle, then resumes that same turn id.
    */
   function maybeRecoverDurableGoalTurn() {
+    if (ARCHIVE_ONLY) return;
     const pending = goalConfig && goalConfig.pending;
     if (!pending || !pending.replyId || !pending.turnId || !conversationId) return;
     if (!goalUsable() || goalConfig?.queuePending || goalBusy || (pending.listenUntil ?? 0) > Date.now()) return;
@@ -10766,6 +10789,7 @@
   }
 
   async function maybeSendGoalReply() {
+    if (ARCHIVE_ONLY) return;
     const draft = goalDraft;
     if (!draft || !conversationId || draft.conversationId !== conversationId) return;
     const target = conversationId, forEpoch = epoch;
@@ -11431,6 +11455,10 @@
   }
 
   async function runCommand(id = markerId(), fromUrl = true, onClaim = null, options = {}) {
+    if (ARCHIVE_ONLY) {
+      if (typeof onClaim === 'function') onClaim(false);
+      return;
+    }
     // Once per command rather than once per document. A worker's tab is opened by a bootstrap
     // and then lives on, and the prime waking that worker later is a second command for the
     // same page: a document-wide latch would refuse every revival a worker ever gets.
@@ -13413,7 +13441,7 @@
   // On an ordinary existing chat there is no marker and this resolves immediately, after
   // which the established reload handshake remains unchanged: resumeOpenTurn() is still
   // awaited before the first observe() so a reloaded live turn cannot be duplicated.
-  const startupCommandId = markerId();
+  const startupCommandId = ARCHIVE_ONLY ? null : markerId();
   // Fresh worker/resume pages still deliver before status restoration: they own an empty New
   // Chat and need no prior conversation lifecycle. A revival is the opposite. Let the recorder
   // restore this existing chat's durable open turn first, otherwise a reload during a Stop-button

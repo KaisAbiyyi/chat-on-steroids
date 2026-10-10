@@ -763,6 +763,64 @@ describe('who is allowed to talk to it', () => {
     }
   });
 
+  it.each([
+    ['/cos-browser/sign-in', {}],
+    ['/browser-control', {}],
+    ['/models', {}],
+    ['/plugin-refresh', {}],
+    ['/input/claim', {}],
+    ['/repairs/claim', {}],
+    ['/compact', {}],
+    ['/goal/draft', {}],
+    ['/goal/ack', {}],
+    ['/goal/objective', {}],
+    ['/goal/open', {}],
+    ['/settings', {}],
+    ['/commands/revivals/pending', {}],
+    ['/commands/redeem', {}],
+    ['/commands/step', {}],
+    ['/commands/ack', {}]
+  ])('refuses the active browser route %s while running as Mind Place', async (route, body) => {
+    await pair();
+    vi.stubEnv('MIND_PLACE_MODE', '1');
+    try {
+      const reply = await request('POST', route, { body });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toEqual({ error: 'mind_place_read_only' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('still records passive browser observations while running as Mind Place', async () => {
+    await pair();
+    vi.stubEnv('MIND_PLACE_MODE', '1');
+    try {
+      const historical = Date.now() - 45 * 24 * 3600_000;
+      const conversationId = 'c0ffee00-1111-4222-8333-444444444444';
+      const event = {
+        kind: 'assistant_message',
+        time: historical,
+        text: 'archived in Mind Place',
+        messageId: 'mind-place-archive-a',
+        state: 'final',
+        final: true
+      };
+      const first = await request('POST', '/events', { body: { conversationId, events: [event] } });
+      const replay = await request('POST', '/events', { body: { conversationId, events: [event] } });
+
+      expect(first.status).toBe(200);
+      expect(first.body.stored).toBe(1);
+      expect(replay.status).toBe(200);
+      expect(replay.body.stored).toBe(0);
+      const events = await readEvents(first.body.sessionId, { kinds: ['assistant_message'] });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.time).toBe(historical);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('refuses every web page origin, chatgpt.com included', async () => {
     for (const origin of ['https://chatgpt.com', 'https://evil.example.com', 'http://localhost:3000', 'null']) {
       const reply = await request('GET', '/hello', { origin, auth: null });

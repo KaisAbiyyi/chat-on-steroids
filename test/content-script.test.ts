@@ -218,7 +218,8 @@ async function harness(
   replies: Record<string, (message: Record<string, any>) => unknown> = {},
   before: (document: Document, dom: JSDOM) => void = () => undefined,
   confirmedNonPro = false,
-  holdSendDeadline = false
+  holdSendDeadline = false,
+  manifestName = 'Chat On Steroids'
 ): Promise<Harness> {
   const dom = new JSDOM(PAGE, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   const window = dom.window as unknown as Window & typeof globalThis & Record<string, any>;
@@ -270,6 +271,7 @@ async function harness(
   window.chrome = {
     runtime: {
       id: 'clf-extension-id',
+      getManifest: () => ({ name: manifestName, version: '1.6.0' }),
       async sendMessage(message: Record<string, any>) {
         sent.push(message);
         // The durable pre-Send fence. Most tests are not about it and get a permissive
@@ -13379,6 +13381,24 @@ describe('content-script localization', () => {
 });
 
 describe('the Compact & resume control', () => {
+  it('does not inject CoS controls or redeem marked commands in Mind Place Capture', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?clf=archive-only-command',
+      {},
+      () => undefined,
+      false,
+      false,
+      'Mind Place Capture'
+    );
+
+    live.hook.injectControl();
+    live.hook.injectStage();
+
+    expect(live.document.querySelector('[data-clf-composer]')).toBeNull();
+    expect(live.document.querySelector('[data-clf-stage]')).toBeNull();
+    expect(live.sent.some(message => ['redeem', 'compact', 'goal_draft', 'goal_open', 'goal_objective', 'settings_set'].includes(message.type))).toBe(false);
+  });
+
   /**
    * It used to remove itself here, and that was right while compaction was all it did: a
    * disabled "send a message first" button is not worth half a composer. A goal changed that.

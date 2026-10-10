@@ -515,6 +515,7 @@ function response(status: number, data: unknown) {
 function loadWorker(options: {
   local: FakeStorageArea;
   session: FakeStorageArea;
+  manifestName?: string;
   cookies?: { getAllCookieStores(): Promise<any[]>; getAll(filter: unknown): Promise<any[]> };
   permissions?: { contains(filter: unknown): Promise<boolean> };
   action?: Record<string, (...args: any[]) => Promise<unknown>>;
@@ -576,7 +577,7 @@ function loadWorker(options: {
         if (file === 'build-stamp.txt') throw new Error('No packaged stamp in this fixture');
         return `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${file}`;
       },
-      getManifest: () => ({ version: '1.6.0' }),
+      getManifest: () => ({ name: options.manifestName ?? 'Chat On Steroids', version: '1.6.0' }),
       onMessage: {
         addListener(fn: typeof listener) {
           listener = fn;
@@ -1096,6 +1097,23 @@ describe('accepted helper tab cleanup', () => {
 });
 
 describe('browser identity', () => {
+  it('fails closed on active page messages in Mind Place Capture before they reach the app', async () => {
+    const fetch = vi.fn(async (_input: string) => response(503, {}));
+    const worker = loadWorker({
+      local: new FakeStorageArea(),
+      session: new FakeStorageArea(),
+      manifestName: 'Mind Place Capture',
+      fetch
+    });
+    await worker.registerTab(1);
+    fetch.mockClear();
+
+    for (const type of ['compact', 'goal_draft', 'goal_ack', 'goal_objective', 'goal_open', 'settings_set', 'redeem', 'command_step', 'ack']) {
+      expect(await worker.send({ type }, 1)).toEqual({ ok: false, error: 'mind_place_read_only' });
+    }
+    expect(fetch.mock.calls.every(([input]) => new URL(input).pathname === '/hello')).toBe(true);
+  });
+
   it('sends one stable random browser id with every app request', async () => {
     const seen: string[] = [];
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });

@@ -35,6 +35,28 @@ const EXPECTED_APP = (() => {
     return 'chat-on-steroids';
   }
 })();
+const ARCHIVE_ONLY = EXPECTED_APP === 'mind-place';
+const ARCHIVE_ONLY_ACTIVE_MESSAGES = new Set([
+  'plugin_refresh',
+  'model_catalog',
+  'desktop_input',
+  'cos_sign_in_transfer',
+  'overwriteNow',
+  'compact',
+  'goal_draft',
+  'focus_tab',
+  'goal_ack',
+  'goal_objective',
+  'goal_open',
+  'settings_set',
+  'stop_redeem',
+  'stop_ack',
+  'command_step',
+  'redeem',
+  'defer_revival',
+  'forget_revival',
+  'ack'
+]);
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** A journal receipt follows durable session writes, which can outlast an ordinary read. */
@@ -2663,6 +2685,7 @@ async function ensurePaired() {
 }
 
 function maintain(woken = false) {
+  if (ARCHIVE_ONLY) return Promise.resolve();
   // Alarm, observation-drain and startup can arrive while tabs.create is awaiting Chrome.
   // Share the whole scan/create pass so one outbox UUID cannot acquire two tabs before ACK.
   if (maintenanceFlight) { maintenanceAgain ||= woken; return maintenanceFlight; }
@@ -3924,12 +3947,12 @@ const HANDLERS = {
       (typeof message.generating === 'boolean' ? `&generating=${message.generating ? 1 : 0}` : '') +
       (typeof message.approval === 'boolean' ? `&approval=${message.approval ? 1 : 0}` : '');
     const result = await call(`/activity${query}`);
-    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
+    if (!ARCHIVE_ONLY && ownsDocument(source) && result.ok && result.data && await acceptBrowserRevivals(result.data)) {
       await recoverDeferredRevivals();
     }
     // A fresh chat the app wants opened beside this one. Offered only to the home chat's own
     // poll, so the window this tab is in is the window its successor is created in.
-    if (ownsDocument(source) && result.ok && result.data && result.data.placement) {
+    if (!ARCHIVE_ONLY && ownsDocument(source) && result.ok && result.data && result.data.placement) {
       await placeSuccessorChat(result.data.placement, source.tab);
     }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
@@ -4328,6 +4351,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = message && typeof message.type === 'string' ? HANDLERS[message.type] : null;
   if (!handler) {
     sendResponse({ ok: false, error: 'unknown_message' });
+    return false;
+  }
+  if (ARCHIVE_ONLY && ARCHIVE_ONLY_ACTIVE_MESSAGES.has(message.type)) {
+    sendResponse({ ok: false, error: 'mind_place_read_only' });
     return false;
   }
   const owned = new Set([
@@ -4826,6 +4853,7 @@ async function reconcileDeferredRevivalsWithApp() {
  * triggers cannot duplicate or cross-deliver text.
  */
 function recoverDeferredRevivals() {
+  if (ARCHIVE_ONLY) return Promise.resolve();
   if (deferredRecoveryWork) return deferredRecoveryWork;
   const work = (async () => {
     await load();

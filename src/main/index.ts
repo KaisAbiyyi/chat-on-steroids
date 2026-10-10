@@ -127,7 +127,8 @@ const mindPlaceRuntime = process.env.MIND_PLACE_MODE === '1';
 // an independent profile before Electron derives the single-instance lock or any persistent path,
 // so running/developing CoS cannot mix config, pairing proof, sessions, or durable state with it.
 if (mindPlaceRuntime) {
-  app.setPath('userData', path.join(app.getPath('appData'), 'Mind Place'));
+  const userDataOverride = process.env.MIND_PLACE_USER_DATA_DIR?.trim();
+  app.setPath('userData', userDataOverride ? path.resolve(userDataOverride) : path.join(app.getPath('appData'), 'Mind Place'));
 }
 
 // One instance only: two copies would fight over the tunnel and the config file.

@@ -886,6 +886,21 @@ describe('bounded IPC identities and OS launch results', () => {
     expect(vi.mocked(shell.openExternal).mock.calls[0]?.[0]).not.toContain('/releases/latest/');
   });
 
+  it('never downloads the ordinary CoS recovery ZIP while running as Mind Place', async () => {
+    vi.stubEnv('MIND_PLACE_MODE', '1');
+    try {
+      const reply = await handlers.get('bridge:downloadExtension')!(null, undefined);
+
+      expect(reply).toEqual({
+        ok: false,
+        error: 'Mind Place uses its dedicated unpacked extension. Use Open extension folder instead.'
+      });
+      expect(shell.openExternal).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('bounds and validates an agent id before it reaches the global broker', async () => {
     const clear = handlers.get('swarm:clearAgent')!;
     const oversized = (await clear(null, 'worker-' + 'x'.repeat(200_000))) as { ok: boolean; error?: string };

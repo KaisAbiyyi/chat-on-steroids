@@ -1594,6 +1594,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('bridge:diagnostics', async () => companionDiagnostics());
 
   handle('bridge:downloadExtension', async () => {
+    if (mindPlaceMode(process.env.MIND_PLACE_MODE)) {
+      throw new Error('Mind Place uses its dedicated unpacked extension. Use Open extension folder instead.');
+    }
     // This is a recovery path for the extension bundled with *this installed app*. Never use
     // releases/latest here: an old app must not fetch a newer extension with a newer protocol.
     await shell.openExternal(extensionDownloadUrl(app.getVersion()));
